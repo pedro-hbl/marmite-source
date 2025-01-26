@@ -135,13 +135,41 @@ By introducing a Semaphore, the number of concurrent tasks can be restricted to 
 
 #### Estimated Time to Process
 
-Given a concurrency level of 100 and a function duration of 100 ms per record:
+Using the following parameters:
+- <code>T</code>: Execution time for a single Lambda invocation.
+- <code>n</code>: Number of concurrent Lambda invocations.
+- <code>Total Records</code>: Total number of records to process.
 
-- Processing time per record: 100 ms
-- Total records: 1,000,000
+The total processing time can be calculated as:
 
-Total time = \(1,000,000 / 100) * 100 ms = 1,000,000 ms = 1,000 seconds = 16.67 minutes\.
+```html
+Total Time = (Total Records / n) * T
+```
 
+#### Example with <code>T = 100 ms</code>
+
+Given:
+- <code>Total Records = 1,000,000</code>
+- <code>n = 100</code>
+- <code>T = 100 ms</code>
+
+Substituting into the formula:
+
+```html
+Total Time = (1,000,000 / 100) * 100 ms
+```
+
+Simplifying:
+
+```html
+Total Time = 10,000 * 100 ms = 1,000,000 ms
+```
+
+Converting to seconds and minutes:
+
+```html
+Total Time = 1,000,000 ms = 1,000 seconds = 16.67 minutes
+```
 
 #### Key Advantages:
 - **Simple Implementation:** Adding a `Semaphore` to the `mapAsync` function involves minimal changes to the codebase.
@@ -177,20 +205,43 @@ suspend fun invokeWithRetry(record: Record, retries: Int = 3) {
 
 #### Estimated Time to Process
 
-Assuming:
-- Retry attempts: 3 per record
-- Backoff delays: 100 ms, 200 ms, 400 ms (cumulative 700 ms per failed record)
-- Concurrency: 100 retries concurrently
+Assume:
+- Each retry introduces a delay that doubles after every attempt.
+- <code>D</code>: Cumulative delay for retries.
+- <code>r</code>: Number of retry attempts per record.
 
-Total time for retries (assuming approx 10% of records require retries):
+Cumulative delay is given by:
 
-Retry time = 100,000 * 700 ms / 100 = 70,000 ms = 70 seconds
+```html
+D = Σ (2^i * T_retry) for i = 1 to r
+```
 
-Total processing time (including retries):
+Where:
+- <code>T_retry</code> = Base retry delay (e.g., 100 ms).
 
-Total time = 16.67 minutes + 1.17 minutes = 17.84 minutes
+Example with <code>T_retry = 100 ms</code> and <code>r = 3</code>:
 
-This assumes optimal conditions where retries are evenly distributed and do not introduce contention.
+```html
+D = (2^1 * 100 ms) + (2^2 * 100 ms) + (2^3 * 100 ms)
+D = 200 ms + 400 ms + 800 ms = 1,400 ms
+```
+
+If 10% of records require retries, the retry time is:
+
+```html
+Retry Time = (Total Records * 10%) * D / n
+Retry Time = (1,000,000 * 0.1) * 1,400 ms / 100
+Retry Time = 1,400,000 ms = 1,400 seconds = 23.33 minutes
+```
+
+Adding this to the initial processing time:
+
+```html
+Total Time = Initial Time + Retry Time
+Total Time = 16.67 minutes + 23.33 minutes = 40 minutes
+```
+
+---
 
 #### Pros:
 - **Handles transient errors gracefully:** Retries ensure that temporary issues, such as short-lived throttling or network disruptions, do not result in failed processing.
@@ -267,36 +318,56 @@ Resources:
         WriteCapacityUnits: 5
 ```
 
-This template highlights the use of batch processing to efficiently write data to DynamoDB while maintaining scalability and cost-efficiency.
-
 #### Estimated Time to Process
 
-Assuming:
-- SQS processes messages in batches of 10.
-- Lambda concurrency: 100 (processing 1,000 messages at a time).
+Assume:
+- <code>T_batch</code>: Execution time for processing a batch.
+- <code>k</code>: Overhead due to batching.
+- <code>b</code>: Number of messages per batch.
+- <code>n</code>: Lambda concurrency.
 
-Processing time per batch: 100 ms
+The total processing time is:
 
-Total time:
-Total time = (1,000,000 / 1,000) * 100 ms = 100,000 ms = 100 seconds = 1.67 minutes
+```html
+Total Time = (Total Records / (b * n)) * (T + k)
+```
 
-<!-- #### Let's do some math over the efficiency
+Example with:
+- <code>T = 100 ms</code>
+- <code>k = 20 ms</code>
+- <code>b = 10</code>
+- <code>n = 100</code>
+- <code>Total Records = 1,000,000</code>
 
-When we analyze the two scenarios mathematically (decoupling architecture vs async invocation):
+Substitute into the formula:
 
-- **Asynchronous Invocation Directly to Lambda:**
-  - Assuming an account TPS limit of 10,000 and burst capacity of 500.
-  - A single pod invoking Lambda with concurrency \( N = 100 \):
-    - TPS needed = \( N * 1/function duration \)
-    - For \(function duration = 100 ms \), TPS needed = \( 100 * (1/0.1) = 1,000 \).
-    - This fits within the limit, but 10 such pods would exceed it. Assuming higher limits, on 10,000,000 records file this would not be efficient.
+```html
+Total Time = (1,000,000 / (10 * 100)) * (100 ms + 20 ms)
+Total Time = (1,000,000 / 1,000) * 120 ms
+Total Time = 1,000 * 120 ms = 120,000 ms
+```
 
-- **SQS with Batch Processing:**
-  - Assuming Lambda batch size = 10 and concurrency = 100.
-  - TPS needed = \( batch size * concurrency * 1/function duration \).
-  - For \( function duration = 100 ms, TPS = \( 10 * 100 * 1/0.1 = 10,000 \)), exactly matching the limit.
-  - SQS decouples the producer from consumer, ensuring that spikes in message production do not directly impact TPS, mitigating burst violations. -->
+Convert to seconds and minutes:
 
+```html
+Total Time = 120,000 ms = 120 seconds = 2 minutes
+```
+
+#### The Importance of FIFO Queues
+
+To maintain consistency in DynamoDB, it is essential to configure the SQS queue as FIFO (First-In, First-Out). This ensures that messages are processed in the exact order they are received, which is critical in systems where the order of operations affects the final state of the database. For example:
+
+1. **Out-of-Order Processing Issues:** If two updates to the same DynamoDB record are processed out of order (e.g., `Update1` followed by `Update2`), but `Update2` depends on `Update1`, the database could end up in an inconsistent state. FIFO queues prevent this by enforcing strict order. For our case, there was not duplicated entries on the file so FIFO was not in considerated despite being absolutely important for this usecase.
+
+2. **Idempotency Challenges:** Even when Lambda functions are designed to be idempotent, out-of-order processing can lead to unexpected behavior if operations rely on sequential execution. For instance, appending logs or incrementing counters requires a guarantee of order.
+
+3. **Trade-offs with FIFO:** While FIFO queues provide consistency, they come with some limitations:
+   - **Lower Throughput:** FIFO queues have a maximum throughput of 300 transactions per second with batching (or 3,000 if using high-throughput mode).
+   - **Increased Latency:** Enforcing order may introduce slight delays in message processing.
+
+Despite these trade-offs, using a FIFO queue is often the most reliable way to ensure data consistency in scenarios involving DynamoDB or similar stateful systems. When consistency is critical, the benefits of FIFO queues far outweigh the downsides.
+
+---
 
 #### Pros:
 - **Decouples producers and consumers:** The producer can continue adding messages to the queue regardless of the Lambda processing speed.
@@ -306,7 +377,7 @@ When we analyze the two scenarios mathematically (decoupling architecture vs asy
 #### Cons:
 - **Adds architectural complexity:** Introducing SQS requires additional components and configuration.
 - **Adds code complexity:** Introduce code complexity to the insertion lambda, so its responsible for managing sqs batch write operations, reading on SQS source and also being able to operate by asynchronous invocation for legacy systems.
-- **Introduces latency:** Messages may wait in the queue before being processed, depending on the Lambda polling rate and queue depth. For example, a queue depth of 10,000 messages and a polling rate of 1,000 messages per second would result in a 10-second processing delay for each 10,0000 messages.
+- **Introduces latency:** Messages may wait in the queue before being processed, depending on the Lambda polling rate and queue depth. For example, a queue depth of 10,000 messages and a polling rate of 1,000 messages per second would result in a processing delay.
 
 ---
 
@@ -323,8 +394,7 @@ AWS Lambda throttling issues, particularly for high-concurrency workloads, can b
 
 - **Retry with Exponential Backoff**: A robust technique for handling transient failures, distributing load over time and avoiding unnecessary retries. Yet, it can add significant latency in worst-case scenarios and increase implementation complexity.
 
-- **Use SQS for Decoupling**: The most stable and distributed-friendly approach, enabling smooth load handling and scalable processing. While it introduces latency and complexity, its benefits make it the go-to solution for large-scale systems.
-
+- **Use SQS for Decoupling**: The most scalable and efficient approach when <code>T_batch = T + k</code>, with <code>k</code> being sufficiently small. While it introduces latency and complexity, its benefits make it the go-to solution for large-scale systems.
 
 ### Next Steps: Implementing a POC
 
