@@ -35,7 +35,7 @@ To better illustrate the challenges and solutions, consider the following use ca
      - \( 28.8KB + 2,000KB = 2.028MB \)
 
 2. **CPU Considerations:**
-   - Each vCPU can handle approximately 100-150 threads (or coroutines) effectively, depending on the workload.
+   - Let's assume each vCPU can handle approximately 100-150 threads (or coroutines) effectively, actually it could handle much more depending on workload. But we can safely assume 100-150 threads as a safe margin for this setup, based on [Kotlin async coroutines benchmark](https://github.com/mmoraesbr/kotlin-coroutine-benchmark).
    - For this use case, 4 vCPUs are sufficient to manage 100 concurrent coroutines with minimal contention.
 
 This setup ensures that the system remains stable while processing a high volume of records efficiently.
